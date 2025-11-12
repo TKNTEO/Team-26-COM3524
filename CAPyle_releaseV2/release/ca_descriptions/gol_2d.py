@@ -1,4 +1,4 @@
-# Name: Conway's game of life
+# Name: Modelling a Forest Fire
 # Dimensions: 2
 
 # --- Set up executable path, do not edit ---
@@ -20,16 +20,16 @@ import numpy as np
 def transition_func(grid, neighbourstates, neighbourcounts):
     # dead = state == 0, live = state == 1
     # unpack state counts for state 0 and state 1
-    dead_neighbours, live_neighbours = neighbourcounts
+    # dead_neighbours, live_neighbours = neighbourcounts
     # create boolean arrays for the birth & survival rules
     # if 3 live neighbours and is dead -> cell born
-    birth = (live_neighbours == 3) & (grid == 0)
+    # birth = (live_neighbours == 3) & (grid == 0)
     # if 2 or 3 live neighbours and is alive -> survives
-    survive = ((live_neighbours == 2) | (live_neighbours == 3)) & (grid == 1)
+    # survive = ((live_neighbours == 2) | (live_neighbours == 3)) & (grid == 1)
     # Set all cells to 0 (dead)
-    grid[:, :] = 0
+    # grid[:, :] = 0
     # Set cells to 1 where either cell is born or survives
-    grid[birth | survive] = 1
+    # grid[birth | survive] = 1
     return grid
 
 
@@ -58,6 +58,8 @@ def setup(args):
 
     return config
 
+def generate_grid(grid):
+    grid[:, :] = 4
 
 def main():
     # Open the config object
@@ -65,6 +67,10 @@ def main():
 
     # Create grid object
     grid = Grid2D(config, transition_func)
+
+    # Grid generation logic function
+    generate_grid(grid)
+
 
     # Run the CA, save grid state every generation to timeline
     timeline = grid.run()
