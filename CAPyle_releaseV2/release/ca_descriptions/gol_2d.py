@@ -16,21 +16,37 @@ from capyle.ca import Grid2D, Neighbourhood, CAConfig, randomise2d
 import capyle.utils as utils
 import numpy as np
 
+STATE_BURNT = 0
+STATE_FIRE = 1
+STATE_WATER = 2
+STATE_DENSE = 3
+STATE_CHAP = 4
+STATE_SCRUB = 5
 
 def transition_func(grid, neighbourstates, neighbourcounts):
-    # dead = state == 0, live = state == 1
-    # unpack state counts for state 0 and state 1
-    # dead_neighbours, live_neighbours = neighbourcounts
-    # create boolean arrays for the birth & survival rules
-    # if 3 live neighbours and is dead -> cell born
-    # birth = (live_neighbours == 3) & (grid == 0)
-    # if 2 or 3 live neighbours and is alive -> survives
-    # survive = ((live_neighbours == 2) | (live_neighbours == 3)) & (grid == 1)
-    # Set all cells to 0 (dead)
-    # grid[:, :] = 0
-    # Set cells to 1 where either cell is born or survives
-    # grid[birth | survive] = 1
-    return grid
+    # burning neighbours
+    burning_neighbours = neighbourcounts[STATE_FIRE]
+    new_grid = grid.copy()
+    # burning become burnt
+    new_grid[grid == STATE_FIRE] = STATE_BURNT
+
+   # catching fire probabilities
+    probability_dense = 0.2
+    probability_chaparral = 0.6
+    probability_scrub = 0.8
+
+    probability = np.random.random(grid.shape)
+
+    dense_burn = (grid == STATE_DENSE) & (burning_neighbours > 0) & (probability < probability_dense)
+    chap_burn  = (grid == STATE_CHAP) & (burning_neighbours > 0) & (probability < probability_chaparral)
+    scrub_burn = (grid == STATE_SCRUB) & (burning_neighbours > 0) & (probability < probability_scrub)
+
+    # all that will catch fire
+    will_burn = dense_burn | chap_burn | scrub_burn
+    new_grid[will_burn] = STATE_FIRE
+
+    return new_grid
+
 
 
 def setup(args):
