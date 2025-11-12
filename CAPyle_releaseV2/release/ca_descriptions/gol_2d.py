@@ -65,7 +65,7 @@ def setup(args):
     # --- 0 = Black, 1 = Orange, 2 = Blue, 3 = Dark Green, 4 = Yellow-Green, 5 = Yellow
     config.state_colors = [(0,0,0),(1,0.5,0),(0.3,0.7,1),(0.1,0.7,0),(0.8,1,0.3),(1,1,0)]
     # config.num_generations = 150
-    # config.grid_dims = (200,200)
+    config.grid_dims = (50,50)
 
     # ----------------------------------------------------------------------
 
