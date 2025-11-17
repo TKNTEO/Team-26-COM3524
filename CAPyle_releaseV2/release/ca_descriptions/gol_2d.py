@@ -17,18 +17,20 @@ import capyle.utils as utils
 import numpy as np
 
 STATE_BURNT = 0
-STATE_FIRE = 1
-STATE_WATER = 2
-STATE_DENSE = 3
-STATE_CHAP = 4
-STATE_SCRUB = 5
+STATE_WATER = 1
+STATE_DENSE = 2
+STATE_CHAP = 3
+STATE_SCRUB = 4
+STATE_DENSE_FIRE = 5
+STATE_CHAP_FIRE = 6
+STATE_SCRUB_FIRE = 7
 
 def transition_func(grid, neighbourstates, neighbourcounts):
     # burning neighbours
-    burning_neighbours = neighbourcounts[STATE_FIRE]
+    burning_neighbours = neighbourcounts[STATE_CHAP_FIRE | STATE_SCRUB_FIRE | STATE_DENSE_FIRE]
     new_grid = grid.copy()
     # burning become burnt
-    new_grid[grid == STATE_FIRE] = STATE_BURNT
+    new_grid[grid == STATE_CHAP_FIRE | STATE_SCRUB_FIRE | STATE_DENSE_FIRE] = STATE_BURNT
 
    # catching fire probabilities
     probability_dense = 0.2
@@ -42,8 +44,9 @@ def transition_func(grid, neighbourstates, neighbourcounts):
     scrub_burn = (grid == STATE_SCRUB) & (burning_neighbours > 0) & (probability < probability_scrub)
 
     # all that will catch fire
-    will_burn = dense_burn | chap_burn | scrub_burn
-    new_grid[will_burn] = STATE_FIRE
+    new_grid[dense_burn] = STATE_DENSE_FIRE
+    new_grid[chap_burn] = STATE_CHAP_FIRE
+    new_grid[scrub_burn] = STATE_SCRUB_FIRE
 
     return new_grid
 
