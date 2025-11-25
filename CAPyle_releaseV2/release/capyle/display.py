@@ -1,4 +1,5 @@
 import sys
+import os
 import tkinter as tk
 import tkinter.font as tkFont
 import numpy as np
@@ -47,6 +48,10 @@ class Display(object):
         self.ca_canvas = FigureCanvasTkAgg(self.ca_graph.fig,
                                            master=self.rcframe)
         self.ca_canvas.get_tk_widget().pack()
+
+        autoload_path = os.environ.get("CAPYLE_AUTOLOAD")
+        if autoload_path and os.path.isfile(autoload_path):
+            self.root.after(0, lambda: self.load_ca(autoload_path))
 
         self.root.mainloop()
 

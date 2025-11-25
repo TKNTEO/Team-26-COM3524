@@ -11,7 +11,8 @@ class _PlaybackUI(tk.Frame):
         self.fpsframe = tk.Frame(self)
         tk.Label(self.fpsframe, text="FPS").pack(side=tk.LEFT, anchor=tk.SE)
         fps_slider = tk.Scale(
-            self.fpsframe, from_=1, to=25, orient=tk.HORIZONTAL, length=100,
+            self.fpsframe, from_=1, to=self.controls.MAX_FRAMERATE,
+            orient=tk.HORIZONTAL, length=100,
             command=lambda x: self.controls.set_fps(x))
         fps_slider.set(self.controls.MAX_FRAMERATE)
         fps_slider.pack(side=tk.TOP, fill=tk.BOTH, padx=1)

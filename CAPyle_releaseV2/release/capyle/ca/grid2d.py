@@ -20,6 +20,7 @@ class Grid2D(Grid):
 
         # wrap size is 1 col & row all the way round the grid
         wrapsize = 1
+        self.wrapsize = wrapsize
         # wrap size doubled for the row/colum on each side of the grid
         # ie. a wrap size of 1 requires 2 extra rows and 2 extra columns
         self.wrapping_grid = np.empty((numrows + wrapsize*2,
@@ -164,10 +165,15 @@ class Grid2D(Grid):
         # passing in the states and counts to allow complex rules
         # if the user supplied any addition arguments, pass them here
         if self.additional_args is None:
-            self.grid = self.transition_func(self.grid, ns, nc)
+            new_grid = self.transition_func(self.grid, ns, nc)
         else:
-            self.grid = self.transition_func(self.grid, ns, nc,
-                                             *self.additional_args)
+            new_grid = self.transition_func(self.grid, ns, nc,
+                                            *self.additional_args)
+
+        # ensure the wrapping grid stays in sync with the returned grid
+        ws = self.wrapsize
+        self.wrapping_grid[ws:-ws, ws:-ws] = new_grid
+        self.grid = self.wrapping_grid[ws:-ws, ws:-ws]
         # refresh wrapping border
         self.refresh_wrap()
 
