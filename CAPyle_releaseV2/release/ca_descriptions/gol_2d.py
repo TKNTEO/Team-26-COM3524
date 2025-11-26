@@ -4,6 +4,7 @@
 # --- Set up executable path, do not edit ---
 import sys
 import inspect
+import os
 this_file_loc = (inspect.stack()[0][1])
 main_dir_loc = this_file_loc[:this_file_loc.index('ca_descriptions')]
 sys.path.append(main_dir_loc)
@@ -24,36 +25,67 @@ STATE_CHAP = 4
 STATE_SCRUB = 5
 STATE_TOWN = 6
 
+# catching fire probabilities
+PROBABILITY_DENSE = 0.0125
+PROBABILITY_CHAPARRAL = 0.2
+PROBABILITY_SCRUB = 0.75
+
 # Burn duration settings (simulation steps)
 BURN_STEPS_CHAPARRAL = 7     # several days
 BURN_STEPS_SCRUB = 1         # several hours
 BURN_STEPS_DENSE_FOREST = 30 # up to one month
 
+# Starting fire location: POWER_PLANT or INCINERATOR (or BOTH)
+START_FIRE_LOCATION = 'POWER_PLANT'
+POWER_PLANT_COORD = (0, 9)
+INCINERATOR_COORD = (0, 99)
+
 # Wind configuration
 # Direction options: NONE, N, S, E, W, NE, NW, SE, SW
-WIND_DIRECTION = 'W'
+WIND_DIRECTION = 'E'
 # Strength controls how strongly wind favours downwind spread over other directions
-WIND_STRENGTH = 0.5
+WIND_STRENGTH = 25
 
 # Map each wind direction to the neighbour indices (NW, N, NE, W, E, SW, S, SE)
 # that are upwind for a target cell. Fire is more likely to travel from these
 # neighbours toward the cell when the wind blows in that direction.
 WIND_FAVOURED_NEIGHBOURS = {
     'NONE': [],
-    'N': [6],          # wind blows north -> stronger influence from south
-    'S': [1],          # wind blows south -> stronger influence from north
-    'E': [3],          # wind blows east  -> stronger influence from west
-    'W': [4],          # wind blows west  -> stronger influence from east
-    'NE': [5, 3, 6],   # wind blows north-east
-    'NW': [4, 6, 7],   # wind blows north-west
-    'SE': [0, 1, 3],   # wind blows south-east
-    'SW': [1, 2, 4],   # wind blows south-west
+    'N': [6],
+    'S': [1],
+    'E': [3],
+    'W': [4],
+    'NE': [5, 3, 6],
+    'NW': [4, 6, 7],
+    'SE': [0, 1, 3],
+    'SW': [1, 2, 4],
 }
+
+# Map each neighbour index to the cell directly opposite (used to suppress upwind spread)
+OPPOSITE_NEIGHBOUR = {0: 7, 1: 6, 2: 5, 3: 4, 4: 3, 5: 2, 6: 1, 7: 0}
 
 # Globals for terrain tracking and burn timers
 terrain_map = None          # immutable reference terrain types
 burn_timers = None          # remaining burn steps per cell while on fire
 burn_duration_grid = None   # lookup of burn duration per terrain cell
+
+def _apply_env_overrides():
+    # Apply optional overrides for wind, strength, and start location
+    global WIND_DIRECTION, WIND_STRENGTH, START_FIRE_LOCATION
+    env_dir = os.environ.get("CA_WIND_DIRECTION")
+    if env_dir:
+        WIND_DIRECTION = env_dir.upper()
+    env_strength = os.environ.get("CA_WIND_STRENGTH")
+    if env_strength:
+        try:
+            WIND_STRENGTH = float(env_strength)
+        except ValueError:
+            pass
+    env_start = os.environ.get("CA_START_LOCATION")
+    if env_start:
+        START_FIRE_LOCATION = env_start.upper()
+
+_apply_env_overrides()
 
 def _favoured_fire(neighbourstates):
     direction = WIND_DIRECTION.upper()
@@ -61,9 +93,20 @@ def _favoured_fire(neighbourstates):
     if not favoured:
         return 0
     favoured_fire = np.zeros_like(neighbourstates[0], dtype=float)
-    for idx in favoured:
-        favoured_fire += (neighbourstates[idx] == STATE_FIRE)
+    for i in favoured:
+        favoured_fire += (neighbourstates[i] == STATE_FIRE)
     return favoured_fire
+
+def _suppressed_fire(neighbourstates):
+    direction = WIND_DIRECTION.upper()
+    favoured = WIND_FAVOURED_NEIGHBOURS.get(direction, [])
+    if not favoured:
+        return 0
+    suppressed_indices = {OPPOSITE_NEIGHBOUR[idx] for idx in favoured}
+    suppressed_fire = np.zeros_like(neighbourstates[0], dtype=float)
+    for i in suppressed_indices:
+        suppressed_fire += (neighbourstates[i] == STATE_FIRE)
+    return suppressed_fire
 
 def _build_burn_duration_grid(base_grid):
     """Precompute how many steps each terrain burns for."""
@@ -74,7 +117,7 @@ def _build_burn_duration_grid(base_grid):
     return durations
 
 def _initialise_burn_support(grid):
-    """Initialise burn tracking grids if they don't exist."""
+    # Initialise burn tracking grids if they don't exist
     global burn_timers, burn_duration_grid, terrain_map
     if terrain_map is None:
         terrain_map = grid.copy()
@@ -90,29 +133,28 @@ def transition_func(grid, neighbourstates, neighbourcounts):
     # burning neighbours
     burning_neighbours = neighbourcounts[STATE_FIRE]
     favoured_fire = _favoured_fire(neighbourstates)
+    suppressed_fire = _suppressed_fire(neighbourstates)
 
-    # wind strongly biases ignition toward the downwind neighbour(s)
-    crosswind_fire = np.maximum(burning_neighbours - favoured_fire, 0)
-    downwind_boost = 1 + favoured_fire * (WIND_STRENGTH * 6)
-    crosswind_penalty = 1 - crosswind_fire * (WIND_STRENGTH * 0.75)
-    crosswind_penalty = np.clip(crosswind_penalty, 0.2, None)
-    wind_multiplier = np.clip(downwind_boost * crosswind_penalty, 0.2, None)
+    if WIND_DIRECTION.upper() == 'NONE' or WIND_STRENGTH <= 0:
+        wind_multiplier = np.ones_like(grid, dtype=float)
+    else:
+        # wind strongly biases ignition toward the downwind neighbour(s)
+        wind_strength_modified = WIND_STRENGTH / 25
+        crosswind_fire = np.maximum(burning_neighbours - favoured_fire - suppressed_fire, 0)
+        downwind_boost = 1 + favoured_fire * (wind_strength_modified * 6)
+        crosswind_penalty = np.clip(1 - crosswind_fire * (wind_strength_modified * 0.6), 0.15, None)
+        upwind_penalty = np.clip(1 - suppressed_fire * (wind_strength_modified * 2.5), 0.05, None)
+        wind_multiplier = np.clip(downwind_boost * crosswind_penalty * upwind_penalty, 0.05, None)
 
     probability = np.random.random(grid.shape)
 
-   # catching fire probabilities
-    probability_dense = 0.01
-    probability_chaparral = 0.2
-    # Scrubland ignites deterministically once adjacent to fire
-    probability_scrub = 0.75
-
-    dense_threshold = np.clip(probability_dense * wind_multiplier, 0, 1)
-    chap_threshold  = np.clip(probability_chaparral * wind_multiplier, 0, 1)
-    scrub_threshold = np.clip(probability_scrub * wind_multiplier, 0, 1)
+    dense_threshold = np.clip(PROBABILITY_DENSE * wind_multiplier, 0, 1)
+    chap_threshold  = np.clip(PROBABILITY_CHAPARRAL * wind_multiplier, 0, 1)
+    scrub_threshold = np.clip(PROBABILITY_SCRUB * wind_multiplier, 0, 1)
 
     dense_burn = (grid == STATE_DENSE) & (burning_neighbours > 0) & (probability < dense_threshold)
     chap_burn  = (grid == STATE_CHAP)  & (burning_neighbours > 0) & (probability < chap_threshold)
-    scrub_burn = (grid == STATE_SCRUB) & (burning_neighbours > 0)
+    scrub_burn = (grid == STATE_SCRUB) & (burning_neighbours > 0) & (probability < scrub_threshold * 3.5)
 
     # all that will catch fire
     will_burn = dense_burn | chap_burn | scrub_burn
@@ -142,8 +184,6 @@ def transition_func(grid, neighbourstates, neighbourcounts):
     burn_timers[finished_burning] = 0
 
     return new
-
-
 
 def setup(args):
     config_path = args[0]
@@ -191,10 +231,13 @@ def generate_grid(grid):
     burn_duration_grid = _build_burn_duration_grid(terrain_map)
     burn_timers = np.zeros_like(grid, dtype=int)
 
-    # Power plant fire
-    grid[0, 9] = STATE_FIRE
-    # Incinerator fire
-    grid[0, 99] = STATE_FIRE
+    start_upper = START_FIRE_LOCATION.upper()
+    if start_upper in ('POWER_PLANT', 'BOTH'):
+        y, x = POWER_PLANT_COORD
+        grid[y, x] = STATE_FIRE
+    if start_upper in ('INCINERATOR', 'BOTH'):
+        y, x = INCINERATOR_COORD
+        grid[y, x] = STATE_FIRE
 
     grid[88:92, 28:32] = STATE_TOWN
 
@@ -220,7 +263,6 @@ def main():
     config.save()
     # save timeline to file
     utils.save(timeline, config.timeline_path)
-
 
 if __name__ == "__main__":
     main()

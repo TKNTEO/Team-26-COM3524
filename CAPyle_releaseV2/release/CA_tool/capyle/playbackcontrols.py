@@ -5,7 +5,7 @@ class _PlaybackControls():
     """Handles all of the control variables and UI elements
     for running through the loaded timeline"""
     UPDATE_DELAY = 200
-    MAX_FRAMERATE = 5
+    MAX_FRAMERATE = 30
 
     def __init__(self, display):
         """Create the PlaybackControls object as well as a PlaybackUI instance

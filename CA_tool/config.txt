@@ -1,2 +1,0 @@
-logo=1
-graph=8
