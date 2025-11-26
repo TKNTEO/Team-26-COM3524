@@ -26,7 +26,6 @@ import capyle.utils as utils  # noqa: E402
 # Make temp files go under release dir
 CAConfig.ROOT_PATH = str(RELEASE_DIR)
 
-
 def render_step(grid, state_colors, out_path):
     cmap = ListedColormap(state_colors)
     bounds = [i - 0.5 for i in range(len(state_colors) + 1)]
@@ -42,9 +41,11 @@ def render_step(grid, state_colors, out_path):
 def run_once(sim_index, start_location, wind_dir, wind_strength, output_dir):
     print(f"Starting simulation {sim_index} "
           f"(start={start_location.upper()}, wind={wind_dir.upper()}@{wind_strength})")
-    os.environ["CA_START_LOCATION"] = start_location.upper()
-    os.environ["CA_WIND_DIRECTION"] = wind_dir.upper()
-    os.environ["CA_WIND_STRENGTH"] = str(wind_strength)
+    os.environ["START_LOCATION"] = start_location.upper()
+    os.environ["WIND_DIRECTION"] = wind_dir.upper()
+    os.environ["WIND_STRENGTH"] = str(wind_strength)
+    if os.environ.get("WATER_DROP"):
+        print(f"  Water drop at {os.environ['WATER_DROP']} after {os.environ.get('WATER_DROP_DELAY', '0')} step(s)")
 
     config = CAConfig(str(CA_FILE))
     config = utils.prerun_ca(config)
@@ -82,13 +83,12 @@ def run_once(sim_index, start_location, wind_dir, wind_strength, output_dir):
     else:
         print(f"Simulation {sim_index}: fire never reached town")
 
-
 def main():
     parser = argparse.ArgumentParser(
         description="Run forest fire simulation repeatedly and capture screenshots.")
     parser.add_argument("start_location",
                         choices=["POWER_PLANT", "INCINERATOR", "BOTH"],
-                        help="Where to ignite the fire.")
+                        help="Where to ignite the fire. (Required)")
     parser.add_argument("runs", nargs="?", type=int, default=1,
                         help="Number of simulations to run (default: 1).")
     parser.add_argument("--wind-direction", "-d", default="NONE",
@@ -96,6 +96,10 @@ def main():
                         help="Wind direction (default: NONE).")
     parser.add_argument("--wind-strength", "-s", type=float, default=50,
                         help="Wind strength (default: 50).")
+    parser.add_argument("--water-drop", "-w",
+                        help='Optional water drop rectangle as "x1,y1:x2,y2".')
+    parser.add_argument("--water-drop-delay", "-y", type=int, default=0,
+                        help="Delay in steps before applying the water drop (default: 0).")
     parser.add_argument("--output-dir", "-o", default="sim_outputs",
                         help="Directory to save screenshots.")
     args = parser.parse_args()
@@ -106,6 +110,12 @@ def main():
 
     output_dir = Path(args.output_dir)
 
+    if args.water_drop:
+        os.environ["WATER_DROP"] = args.water_drop
+    else:
+        os.environ.pop("WATER_DROP", None)
+    os.environ["WATER_DROP_DELAY"] = str(max(0, args.water_drop_delay))
+
     for i in range(args.runs):
         try:
             run_once(i, args.start_location, args.wind_direction,
@@ -114,7 +124,6 @@ def main():
             print(f"Simulation {i} failed: {e}")
             sys.exit(1)
     print(f"Completed {args.runs} run(s). Screenshots saved under {output_dir}.")
-
 
 if __name__ == "__main__":
     main()

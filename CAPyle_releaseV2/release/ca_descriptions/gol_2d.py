@@ -39,12 +39,15 @@ BURN_STEPS_DENSE_FOREST = 30 # up to one month
 START_FIRE_LOCATION = 'POWER_PLANT'
 POWER_PLANT_COORD = (0, 9)
 INCINERATOR_COORD = (0, 99)
+# Optional water drop rectangle set via WATER_DROP env as "x1,y1:x2,y2"
+WATER_DROP_SPEC = None
+WATER_DROP_DELAY = 0  # steps to wait before applying drop
 
 # Wind configuration
 # Direction options: NONE, N, S, E, W, NE, NW, SE, SW
 WIND_DIRECTION = 'E'
 # Strength controls how strongly wind favours downwind spread over other directions
-WIND_STRENGTH = 25
+WIND_STRENGTH = 20
 
 # Map each wind direction to the neighbour indices (NW, N, NE, W, E, SW, S, SE)
 # that are upwind for a target cell. Fire is more likely to travel from these
@@ -68,22 +71,43 @@ OPPOSITE_NEIGHBOUR = {0: 7, 1: 6, 2: 5, 3: 4, 4: 3, 5: 2, 6: 1, 7: 0}
 terrain_map = None          # immutable reference terrain types
 burn_timers = None          # remaining burn steps per cell while on fire
 burn_duration_grid = None   # lookup of burn duration per terrain cell
+_water_drop_applied = False
+_current_step = 0
 
 def _apply_env_overrides():
-    # Apply optional overrides for wind, strength, and start location
-    global WIND_DIRECTION, WIND_STRENGTH, START_FIRE_LOCATION
-    env_dir = os.environ.get("CA_WIND_DIRECTION")
+    # Apply optional overrides for wind, strength, start location, and water drop
+    global WIND_DIRECTION, WIND_STRENGTH, START_FIRE_LOCATION, WATER_DROP_SPEC, WATER_DROP_DELAY
+    env_dir = os.environ.get("WIND_DIRECTION")
     if env_dir:
         WIND_DIRECTION = env_dir.upper()
-    env_strength = os.environ.get("CA_WIND_STRENGTH")
+    env_strength = os.environ.get("WIND_STRENGTH")
     if env_strength:
         try:
             WIND_STRENGTH = float(env_strength)
         except ValueError:
             pass
-    env_start = os.environ.get("CA_START_LOCATION")
+    env_start = os.environ.get("START_LOCATION")
     if env_start:
         START_FIRE_LOCATION = env_start.upper()
+    env_drop = os.environ.get("WATER_DROP")
+    if env_drop:
+        try:
+            left, right = env_drop.split(':')
+            x1_str, y1_str = left.split(',')
+            x2_str, y2_str = right.split(',')
+            x1, y1 = int(x1_str.strip()), int(y1_str.strip())
+            x2, y2 = int(x2_str.strip()), int(y2_str.strip())
+            WATER_DROP_SPEC = (x1, y1, x2, y2)
+        except Exception:
+            pass
+    env_delay = os.environ.get("WATER_DROP_DELAY")
+    if env_delay:
+        try:
+            WATER_DROP_DELAY = max(0, int(env_delay))
+        except ValueError:
+            pass
+    if WATER_DROP_SPEC is None:
+        WATER_DROP_DELAY = 0
 
 _apply_env_overrides()
 
@@ -126,9 +150,31 @@ def _initialise_burn_support(grid):
     if burn_timers is None:
         burn_timers = np.zeros_like(grid, dtype=int)
 
+def _apply_water_drop(grid):
+    """Place a rectangular water drop defined by two corner points (x1,y1:x2,y2)."""
+    global _water_drop_applied, terrain_map, burn_duration_grid
+    if WATER_DROP_SPEC is None or _water_drop_applied:
+        return
+    x1, y1, x2, y2 = WATER_DROP_SPEC
+    xmin, xmax = sorted((x1, x2))
+    ymin, ymax = sorted((y1, y2))
+    xmin = max(0, xmin)
+    ymin = max(0, ymin)
+    xmax = min(grid.shape[1] - 1, xmax)
+    ymax = min(grid.shape[0] - 1, ymax)
+    grid[ymin:ymax+1, xmin:xmax+1] = STATE_WATER
+    if terrain_map is not None:
+        terrain_map[ymin:ymax+1, xmin:xmax+1] = STATE_WATER
+    if burn_duration_grid is not None:
+        burn_duration_grid[ymin:ymax+1, xmin:xmax+1] = 0
+    _water_drop_applied = True
+
 def transition_func(grid, neighbourstates, neighbourcounts):
 
-    global burn_timers
+    global burn_timers, _current_step
+    if WATER_DROP_SPEC and not _water_drop_applied and _current_step >= WATER_DROP_DELAY:
+        _apply_water_drop(grid)
+
     old = grid.copy()
     # burning neighbours
     burning_neighbours = neighbourcounts[STATE_FIRE]
@@ -142,7 +188,7 @@ def transition_func(grid, neighbourstates, neighbourcounts):
         wind_strength_modified = WIND_STRENGTH / 25
         crosswind_fire = np.maximum(burning_neighbours - favoured_fire - suppressed_fire, 0)
         downwind_boost = 1 + favoured_fire * (wind_strength_modified * 6)
-        crosswind_penalty = np.clip(1 - crosswind_fire * (wind_strength_modified * 0.6), 0.15, None)
+        crosswind_penalty = np.clip(1 - crosswind_fire * (wind_strength_modified * 0.7), 0.15, None)
         upwind_penalty = np.clip(1 - suppressed_fire * (wind_strength_modified * 2.5), 0.05, None)
         wind_multiplier = np.clip(downwind_boost * crosswind_penalty * upwind_penalty, 0.05, None)
 
@@ -183,6 +229,7 @@ def transition_func(grid, neighbourstates, neighbourcounts):
     # ensure timers for finished cells are reset
     burn_timers[finished_burning] = 0
 
+    _current_step += 1
     return new
 
 def setup(args):
@@ -212,8 +259,10 @@ def setup(args):
     return config
 
 def generate_grid(grid):
-    global terrain_map, burn_timers, burn_duration_grid
+    global terrain_map, burn_timers, burn_duration_grid, _water_drop_applied, _current_step
 
+    _water_drop_applied = False
+    _current_step = 0
     grid[:, :] = STATE_CHAP
 
     # grid[y, x] = state
@@ -225,6 +274,10 @@ def generate_grid(grid):
     grid[80:85, 50:80] = STATE_WATER
 
     grid[20:65, 70:75] = STATE_SCRUB
+
+    # apply optional water drop before terrain snapshot if immediate
+    if WATER_DROP_SPEC and WATER_DROP_DELAY <= 0:
+        _apply_water_drop(grid)
 
     # snapshot of underlying terrain for burn duration tracking
     terrain_map = grid.copy()
