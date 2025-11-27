@@ -78,10 +78,11 @@ def run_once(sim_index, start_location, wind_dir, wind_strength, output_dir):
         render_step(timeline[step], state_colors, out_path)
     if town_contact_step is not None:
         print(f"Simulation {sim_index}: fire reached town at step {town_contact_step}")
-        out_path = output_dir / f"sim{sim_index}_town_step{town_contact_step}.png"
+        out_path = output_dir / f"sim{sim_index}_town.png"
         render_step(timeline[town_contact_step], state_colors, out_path)
     else:
         print(f"Simulation {sim_index}: fire never reached town")
+    return town_contact_step
 
 def main():
     parser = argparse.ArgumentParser(
@@ -94,8 +95,8 @@ def main():
     parser.add_argument("--wind-direction", "-d", default="NONE",
                         choices=["NONE", "N", "S", "E", "W", "NE", "NW", "SE", "SW"],
                         help="Wind direction (default: NONE).")
-    parser.add_argument("--wind-strength", "-s", type=float, default=50,
-                        help="Wind strength (default: 50).")
+    parser.add_argument("--wind-strength", "-s", type=float, default=25,
+                        help="Wind strength (default: 25).")
     parser.add_argument("--water-drop", "-w",
                         help='Optional water drop rectangle as "x1,y1:x2,y2".')
     parser.add_argument("--water-drop-delay", "-y", type=int, default=0,
@@ -116,14 +117,23 @@ def main():
         os.environ.pop("WATER_DROP", None)
     os.environ["WATER_DROP_DELAY"] = str(max(0, args.water_drop_delay))
 
+    contact_steps = []
     for i in range(args.runs):
         try:
-            run_once(i, args.start_location, args.wind_direction,
-                     args.wind_strength, output_dir)
+            contact_step = run_once(i, args.start_location, args.wind_direction,
+                                    args.wind_strength, output_dir)
+            if contact_step is not None:
+                contact_steps.append(contact_step)
         except Exception as e:
             print(f"Simulation {i} failed: {e}")
             sys.exit(1)
     print(f"Completed {args.runs} run(s). Screenshots saved under {output_dir}.")
+    if contact_steps:
+        avg = sum(contact_steps) / len(contact_steps)
+        print(f"Average steps for fire to reach town over {len(contact_steps)} "
+              f"run(s): {avg:.2f}")
+    else:
+        print("Fire never reached town in any run; no average to report.")
 
 if __name__ == "__main__":
     main()

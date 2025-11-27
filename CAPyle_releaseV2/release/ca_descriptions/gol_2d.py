@@ -31,16 +31,16 @@ PROBABILITY_CHAPARRAL = 0.2
 PROBABILITY_SCRUB = 0.75
 
 # Burn duration settings (simulation steps)
-BURN_STEPS_CHAPARRAL = 7     # several days
-BURN_STEPS_SCRUB = 1         # several hours
-BURN_STEPS_DENSE_FOREST = 30 # up to one month
+BURN_STEPS_CHAPARRAL = 5
+BURN_STEPS_SCRUB = 1
+BURN_STEPS_DENSE_FOREST = 45
 
 # Starting fire location: POWER_PLANT or INCINERATOR (or BOTH)
 START_FIRE_LOCATION = 'POWER_PLANT'
 POWER_PLANT_COORD = (0, 9)
 INCINERATOR_COORD = (0, 99)
 # Optional water drop rectangle set via WATER_DROP env as "x1,y1:x2,y2"
-WATER_DROP_SPEC = None
+WATER_DROP = None
 WATER_DROP_DELAY = 0  # steps to wait before applying drop
 
 # Wind configuration
@@ -74,9 +74,9 @@ burn_duration_grid = None   # lookup of burn duration per terrain cell
 _water_drop_applied = False
 _current_step = 0
 
-def _apply_env_overrides():
+def apply_env_overrides():
     # Apply optional overrides for wind, strength, start location, and water drop
-    global WIND_DIRECTION, WIND_STRENGTH, START_FIRE_LOCATION, WATER_DROP_SPEC, WATER_DROP_DELAY
+    global WIND_DIRECTION, WIND_STRENGTH, START_FIRE_LOCATION, WATER_DROP, WATER_DROP_DELAY
     env_dir = os.environ.get("WIND_DIRECTION")
     if env_dir:
         WIND_DIRECTION = env_dir.upper()
@@ -97,7 +97,7 @@ def _apply_env_overrides():
             x2_str, y2_str = right.split(',')
             x1, y1 = int(x1_str.strip()), int(y1_str.strip())
             x2, y2 = int(x2_str.strip()), int(y2_str.strip())
-            WATER_DROP_SPEC = (x1, y1, x2, y2)
+            WATER_DROP = (x1, y1, x2, y2)
         except Exception:
             pass
     env_delay = os.environ.get("WATER_DROP_DELAY")
@@ -106,10 +106,10 @@ def _apply_env_overrides():
             WATER_DROP_DELAY = max(0, int(env_delay))
         except ValueError:
             pass
-    if WATER_DROP_SPEC is None:
+    if WATER_DROP is None:
         WATER_DROP_DELAY = 0
 
-_apply_env_overrides()
+apply_env_overrides()
 
 def _favoured_fire(neighbourstates):
     direction = WIND_DIRECTION.upper()
@@ -132,7 +132,7 @@ def _suppressed_fire(neighbourstates):
         suppressed_fire += (neighbourstates[i] == STATE_FIRE)
     return suppressed_fire
 
-def _build_burn_duration_grid(base_grid):
+def build_burn_duration_grid(base_grid):
     """Precompute how many steps each terrain burns for."""
     durations = np.zeros_like(base_grid, dtype=int)
     durations[base_grid == STATE_CHAP] = BURN_STEPS_CHAPARRAL
@@ -140,22 +140,22 @@ def _build_burn_duration_grid(base_grid):
     durations[base_grid == STATE_DENSE] = BURN_STEPS_DENSE_FOREST
     return durations
 
-def _initialise_burn_support(grid):
+def initialise_burn_support(grid):
     # Initialise burn tracking grids if they don't exist
     global burn_timers, burn_duration_grid, terrain_map
     if terrain_map is None:
         terrain_map = grid.copy()
     if burn_duration_grid is None:
-        burn_duration_grid = _build_burn_duration_grid(terrain_map)
+        burn_duration_grid = build_burn_duration_grid(terrain_map)
     if burn_timers is None:
         burn_timers = np.zeros_like(grid, dtype=int)
 
-def _apply_water_drop(grid):
-    """Place a rectangular water drop defined by two corner points (x1,y1:x2,y2)."""
+def apply_water_drop(grid):
+    # Place a rectangular water drop defined by two corner points (x1,y1:x2,y2)
     global _water_drop_applied, terrain_map, burn_duration_grid
-    if WATER_DROP_SPEC is None or _water_drop_applied:
+    if WATER_DROP is None or _water_drop_applied:
         return
-    x1, y1, x2, y2 = WATER_DROP_SPEC
+    x1, y1, x2, y2 = WATER_DROP
     xmin, xmax = sorted((x1, x2))
     ymin, ymax = sorted((y1, y2))
     xmin = max(0, xmin)
@@ -170,10 +170,9 @@ def _apply_water_drop(grid):
     _water_drop_applied = True
 
 def transition_func(grid, neighbourstates, neighbourcounts):
-
     global burn_timers, _current_step
-    if WATER_DROP_SPEC and not _water_drop_applied and _current_step >= WATER_DROP_DELAY:
-        _apply_water_drop(grid)
+    if WATER_DROP and not _water_drop_applied and _current_step >= WATER_DROP_DELAY:
+        apply_water_drop(grid)
 
     old = grid.copy()
     # burning neighbours
@@ -207,7 +206,7 @@ def transition_func(grid, neighbourstates, neighbourcounts):
 
     # ensure burn timers exist (fallback if generate_grid wasn't called)
     if burn_timers is None:
-        _initialise_burn_support(grid)
+        initialise_burn_support(grid)
 
     # update burn timers for cells currently on fire
     currently_burning = (grid == STATE_FIRE)
@@ -276,12 +275,12 @@ def generate_grid(grid):
     grid[20:65, 70:75] = STATE_SCRUB
 
     # apply optional water drop before terrain snapshot if immediate
-    if WATER_DROP_SPEC and WATER_DROP_DELAY <= 0:
-        _apply_water_drop(grid)
+    if WATER_DROP and WATER_DROP_DELAY <= 0:
+        apply_water_drop(grid)
 
     # snapshot of underlying terrain for burn duration tracking
     terrain_map = grid.copy()
-    burn_duration_grid = _build_burn_duration_grid(terrain_map)
+    burn_duration_grid = build_burn_duration_grid(terrain_map)
     burn_timers = np.zeros_like(grid, dtype=int)
 
     start_upper = START_FIRE_LOCATION.upper()
